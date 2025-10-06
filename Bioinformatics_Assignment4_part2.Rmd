@@ -1,0 +1,500 @@
+---
+title: "Bioinformatics Assignment 4 Report"
+author: "Avishka Kavindi Vithanage (s225407945)"
+date: "2025-10-06"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+# ---- Global Setup ----
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+root <- getwd()
+paths <- list(
+  data    = file.path(root, "data"),
+  figs    = file.path(root, "figures"),
+  out     = file.path(root, "output"),
+  scripts = file.path(root, "scripts")
+)
+
+dir.create(paths$data,    showWarnings = FALSE)
+dir.create(paths$figs,    showWarnings = FALSE)
+dir.create(paths$out,     showWarnings = FALSE)
+dir.create(paths$scripts, showWarnings = FALSE)
+
+needs <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, repos = "https://cloud.r-project.org")
+  }
+  library(pkg, character.only = TRUE)
+}
+stopifnot(
+  exists("paths"),
+  dir.exists(paths$data),
+  dir.exists(paths$out),
+  dir.exists(paths$figs)
+)
+
+```
+# Part 2 — Sequence Diversity: *E. coli* vs *Cryobacterium* sp. SO1
+
+## Setup (packages and folders)
+```{r p2-setup, include=FALSE}
+# Use your paths list from the setup chunk if you have it
+outdirT <- paths$out
+outdirF <- paths$figs
+datadir <- paths$data
+
+dir.create(outdirT, showWarnings = FALSE)
+dir.create(outdirF, showWarnings = FALSE)
+dir.create(datadir, showWarnings = FALSE)
+
+needs("seqinr"); needs("R.utils")
+```
+
+## Download coding sequences (CDS) FASTA
+**Method:** CDS FASTA files for *E. coli* (K-12 MG1655) and *Cryobacterium* sp. SO1 were downloaded (gzip), decompressed, and stored locally for analysis.
+
+```{r p2-download}
+URL_ECOLI <- "http://ftp.ensemblgenomes.org/pub/bacteria/release-53/fasta/bacteria_0_collection/escherichia_coli_str_k_12_substr_mg1655_gca_000005845/cds/Escherichia_coli_str_k_12_substr_mg1655_gca_000005845.ASM584v2.cds.all.fa.gz"
+URL_CRYO  <- "https://ftp.ensemblgenomes.ebi.ac.uk/pub/bacteria/release-62/fasta/bacteria_98_collection/cryobacterium_sp_so1_gca_004210215/cds/Cryobacterium_sp_so1_gca_004210215.ASM421021v1.cds.all.fa.gz"
+
+ecoli_gz <- file.path(datadir, "ecoli_cds.fa.gz")
+cryo_gz  <- file.path(datadir, "cryo_cds.fa.gz")
+ecoli_fa <- file.path(datadir, "ecoli_cds.fa")
+cryo_fa  <- file.path(datadir, "cryo_cds.fa")
+
+if (!file.exists(ecoli_fa)) {
+  download.file(URL_ECOLI, destfile = ecoli_gz, mode = "wb", quiet = TRUE)
+  R.utils::gunzip(ecoli_gz, overwrite = TRUE, remove = TRUE)
+}
+if (!file.exists(cryo_fa)) {
+  download.file(URL_CRYO, destfile = cryo_gz, mode = "wb", quiet = TRUE)
+  R.utils::gunzip(cryo_gz, overwrite = TRUE, remove = TRUE)
+}
+file.exists(ecoli_fa) && file.exists(cryo_fa)
+```
+
+## Read FASTA files
+```{r p2-read}
+cds_ecoli <- seqinr::read.fasta(ecoli_fa, seqtype = "DNA", as.string = FALSE, forceDNAtolower = FALSE)
+cds_cryo  <- seqinr::read.fasta(cryo_fa,  seqtype = "DNA", as.string = FALSE, forceDNAtolower = FALSE)
+length(cds_ecoli); length(cds_cryo)
+```
+
+## Q1 — How many coding sequences (CDS)?
+**Method:** Count the number of CDS entries in each organism’s FASTA file.
+
+**Code and Output:**
+```{r p2-q1}
+n_ecoli <- length(cds_ecoli)
+n_cryo  <- length(cds_cryo)
+tab_counts <- data.frame(
+  Organism  = c("E. coli K-12 MG1655", "Cryobacterium sp. SO1"),
+  CDS_count = c(n_ecoli, n_cryo)
+)
+
+# Save and display
+write.csv(tab_counts, file.path(outdirT, "p2_q1_cds_counts.csv"), row.names = FALSE)
+knitr::kable(tab_counts, caption = "Number of coding sequences (CDS) per organism")
+```
+
+**Brief interpretation:** *E. coli* and *Cryobacterium* differ in total CDS counts, reflecting genome size and gene content differences typical of their lineages and habitats.
+
+
+## Q2 – Total coding DNA length for *E. coli* and *Cryobacterium sp.* SO1
+
+**Method:**  
+The total length of coding DNA was determined by summing the base-pair lengths of all CDS entries for each organism.  
+The `summary()` function from the **seqinr** package provides sequence lengths, which were converted to numeric values and summed.
+
+**Code and Output:**
+```{r p2-q2}
+# ---- Q2: Total coding DNA length ----
+len_ecoli <- as.numeric(summary(cds_ecoli)[, 1])
+len_cryo  <- as.numeric(summary(cds_cryo)[, 1])
+
+tab_totbp <- data.frame(
+  Organism     = c("E. coli K-12 MG1655", "Cryobacterium sp. SO1"),
+  CDS_count    = c(n_ecoli, n_cryo),
+  Total_CDS_bp = c(sum(len_ecoli), sum(len_cryo))
+)
+
+# Save and display results
+write.csv(tab_totbp, file.path(outdirT, "p2_q2_total_coding_bp.csv"), row.names = FALSE)
+knitr::kable(tab_totbp, caption = "Total coding DNA length (bp) and number of CDS per organism")
+```
+
+**Explanation:**  
+This table shows the total number of base pairs contained in all coding sequences for both organisms.  
+A higher total coding DNA length indicates a larger genome or more extensive gene repertoire.  
+*E. coli* typically has fewer but shorter coding sequences, while *Cryobacterium* species often have slightly longer genomes adapted to cold environments.
+
+
+## Q3 – Coding sequence (CDS) length distribution, mean, and median
+
+**Method:**  
+The lengths of all coding sequences were calculated for each organism.  
+The `aggregate()` function was used to compute the mean and median CDS length per organism.  
+A boxplot was generated to visualise differences in CDS length distributions between *E. coli* and *Cryobacterium sp.* SO1.
+
+**Code and Output:**
+```{r p2-q3}
+# ---- Q3: Length distributions + boxplot + mean/median ----
+len_df <- rbind(
+  data.frame(Organism = "E. coli", Len = len_ecoli),
+  data.frame(Organism = "Cryobacterium", Len = len_cryo)
+)
+
+# Compute mean and median for each organism
+stats_len <- aggregate(Len ~ Organism, data = len_df,
+                       FUN = function(x) c(Mean = mean(x), Median = median(x)))
+
+# Unwrap results into columns
+stats_len_out <- data.frame(
+  Organism = stats_len$Organism,
+  Mean     = sapply(stats_len$Len, `[`, 1),
+  Median   = sapply(stats_len$Len, `[`, 2)
+)
+
+# Save summary table
+write.csv(stats_len_out, file.path(outdirT, "p2_q3_len_mean_median.csv"), row.names = FALSE)
+
+# Display table in report
+knitr::kable(stats_len_out, caption = "Mean and median CDS length (bp) for each organism")
+
+# Create and save boxplot
+png(file.path(outdirF, "fig_p2_q3_len_boxplot.png"), width = 900, height = 600)
+boxplot(Len ~ Organism, data = len_df, ylab = "CDS length (bp)",
+        main = "CDS length distribution", col = c("lightblue", "lightgreen"))
+grid()
+dev.off()
+```
+
+**Display in report:**
+```{r p2-q3-show, echo=FALSE, fig.align='center'}
+knitr::include_graphics(file.path(outdirF, "fig_p2_q3_len_boxplot.png"))
+```
+
+**Explanation:**  
+The summary statistics show that *E. coli* generally has slightly shorter CDS lengths compared to *Cryobacterium sp.* SO1.  
+The boxplot confirms this difference, showing that *Cryobacterium* genes tend to be longer, possibly reflecting adaptations to cold environments or additional gene complexity.
+
+
+## Q4 – Nucleotide and amino-acid frequencies (counts, proportions, bar plots)
+
+**Method:**  
+All CDS for each organism were concatenated and base frequencies (A/C/G/T) were counted and normalised to proportions.  
+CDS were translated to proteins; 20 standard amino-acid counts were computed (stop `*` removed) and normalised.  
+Bar plots compare **E. coli** and **Cryobacterium sp. SO1**.
+
+**Code and Output:**
+```{r p2-q4}
+# ---- Q4: Nucleotide & Amino-acid frequencies (barplots) ----
+
+# 1) Nucleotide frequencies (ensure lowercase to match 'a','c','g','t')
+dna_ecoli <- tolower(unlist(cds_ecoli))
+dna_cryo  <- tolower(unlist(cds_cryo))
+
+nt_ecoli <- seqinr::count(dna_ecoli, 1)
+nt_cryo  <- seqinr::count(dna_cryo,  1)
+
+# keep canonical bases only (drop Ns if present)
+nt_ecoli <- nt_ecoli[c("a","c","g","t")]
+nt_cryo  <- nt_cryo[c("a","c","g","t")]
+
+nt_tab <- data.frame(
+  Base = c("A","C","G","T"),
+  E_coli = as.numeric(nt_ecoli),
+  Cryobacterium = as.numeric(nt_cryo)
+)
+
+nt_prop <- within(nt_tab, {
+  E_coli        <- E_coli / sum(E_coli)
+  Cryobacterium <- Cryobacterium / sum(Cryobacterium)
+})
+
+# save tables
+write.csv(nt_tab,  file.path(outdirT, "p2_q4_nt_counts.csv"),      row.names = FALSE)
+write.csv(nt_prop, file.path(outdirT, "p2_q4_nt_proportions.csv"), row.names = FALSE)
+
+# plot nucleotide proportions
+png(file.path(outdirF, "fig_p2_q4_nt_proportions.png"), width = 900, height = 600)
+barplot(t(as.matrix(nt_prop[, -1])), beside = TRUE,
+        names.arg = nt_prop$Base,
+        ylim = c(0, max(nt_prop[, -1]) * 1.1),
+        main = "Nucleotide proportions in CDS")
+legend("topright", legend = c("E. coli","Cryobacterium"),
+       fill = c("gray60","gray80"), bty = "n")
+grid()
+dev.off()
+
+# 2) Amino-acid frequencies
+aa_alphabet <- seqinr::s2c("ACDEFGHIKLMNPQRSTVWY")  # 20 standard AAs
+prot_ecoli <- lapply(cds_ecoli, seqinr::translate)
+prot_cryo  <- lapply(cds_cryo,  seqinr::translate)
+
+# concatenate and drop stop codons (*)
+prot_ecoli_all <- unlist(prot_ecoli); prot_ecoli_all <- prot_ecoli_all[prot_ecoli_all != "*"]
+prot_cryo_all  <- unlist(prot_cryo);  prot_cryo_all  <- prot_cryo_all[prot_cryo_all  != "*"]
+
+aa_ecoli <- seqinr::count(prot_ecoli_all, wordsize = 1, alphabet = aa_alphabet)
+aa_cryo  <- seqinr::count(prot_cryo_all,  wordsize = 1, alphabet = aa_alphabet)
+
+aa_tab <- data.frame(
+  AminoAcid = aa_alphabet,
+  E_coli = as.numeric(aa_ecoli),
+  Cryobacterium = as.numeric(aa_cryo)
+)
+
+aa_prop <- within(aa_tab, {
+  E_coli        <- E_coli / sum(E_coli)
+  Cryobacterium <- Cryobacterium / sum(Cryobacterium)
+})
+
+# save AA tables
+write.csv(aa_tab,  file.path(outdirT, "p2_q4_aa_counts.csv"),      row.names = FALSE)
+write.csv(aa_prop, file.path(outdirT, "p2_q4_aa_proportions.csv"), row.names = FALSE)
+
+# plot amino-acid proportions
+png(file.path(outdirF, "fig_p2_q4_aa_proportions.png"), width = 1000, height = 600)
+barplot(t(as.matrix(aa_prop[, -1])), beside = TRUE,
+        names.arg = aa_prop$AminoAcid, las = 2,
+        main = "Amino-acid proportions (translated CDS)")
+legend("topright", legend = c("E. coli","Cryobacterium"),
+       fill = c("gray60","gray80"), bty = "n")
+grid()
+dev.off()
+
+# Show key tables in the report
+knitr::kable(nt_prop, caption = "Nucleotide proportions in total CDS")
+knitr::kable(aa_prop, caption = "Amino-acid proportions (translated CDS)")
+```
+
+**Display figures:**
+```{r p2-q4-show, echo=FALSE, fig.align='center'}
+knitr::include_graphics(file.path(outdirF, "fig_p2_q4_nt_proportions.png"))
+knitr::include_graphics(file.path(outdirF, "fig_p2_q4_aa_proportions.png"))
+```
+
+**Explanation:**  
+- **Nucleotides:** Differences (e.g., higher G+C in *Cryobacterium*) suggest distinct genomic GC content, often linked to environmental adaptation.  
+- **Amino acids:** Shifts in AA usage can reflect GC bias (e.g., preference for GC-rich codons), protein composition, and evolutionary constraints across taxa.
+
+
+
+## Q5 – Codon usage and bias (RSCU)
+
+**Method:**  
+All CDS per organism were concatenated into a single DNA sequence, cleaned to include only A/C/G/T and trimmed so the total length is divisible by three. Codon usage bias was quantified with **RSCU** (Relative Synonymous Codon Usage) using `seqinr::uco()`. We compared organisms by taking the **difference in RSCU** for each codon and visualised the **top 20 codons with the largest |ΔRSCU|**. Stop codons were excluded.
+
+**Code and Output:**
+```{r p2-q5}
+# ---- Q5: Codon usage & bias (RSCU) ----
+
+# helper: clean, concat, and trim to frame
+clean_concat <- function(cds_list) {
+  v <- tolower(unlist(cds_list))
+  v <- v[v %in% c("a","c","g","t")]          # remove N/ambiguous
+  rem <- length(v) %% 3
+  if (rem != 0) v <- v[seq_len(length(v) - rem)]  # trim to multiple of 3
+  v
+}
+
+ecoli_concat <- clean_concat(cds_ecoli)
+cryo_concat  <- clean_concat(cds_cryo)
+
+# RSCU tables
+rscu_ecoli <- seqinr::uco(ecoli_concat, index = "rscu", as.data.frame = TRUE)
+rscu_cryo  <- seqinr::uco(cryo_concat,  index = "rscu", as.data.frame = TRUE)
+
+# optional: drop stop codons if present
+rscu_ecoli <- subset(rscu_ecoli, AA != "*")
+rscu_cryo  <- subset(rscu_cryo,  AA != "*")
+
+# ensure shared codon list/order
+codons <- sort(unique(c(rscu_ecoli$codon, rscu_cryo$codon)))
+getRSCU <- function(df, codons) {
+  x <- df[match(codons, df$codon), c("codon","AA","RSCU")]
+  x$RSCU[is.na(x$RSCU)] <- 0
+  x
+}
+E <- getRSCU(rscu_ecoli, codons)
+C <- getRSCU(rscu_cryo,  codons)
+
+codon_tab <- data.frame(
+  Codon       = codons,
+  AA          = E$AA,
+  RSCU_Ecoli  = E$RSCU,
+  RSCU_Cryo   = C$RSCU,
+  Diff        = C$RSCU - E$RSCU
+)
+
+# save table & show a preview
+write.csv(codon_tab, file.path(outdirT, "p2_q5_codon_rscu.csv"), row.names = FALSE)
+knitr::kable(head(codon_tab[order(-abs(codon_tab$Diff)), ], 10),
+             caption = "Top 10 codons by |ΔRSCU| (preview)")
+             
+# bar plot for top 20 |ΔRSCU|
+ord <- order(abs(codon_tab$Diff), decreasing = TRUE)
+top <- codon_tab[ord[1:20], ]
+
+png(file.path(outdirF, "fig_p2_q5_codon_rscu_topdiff.png"), width = 1100, height = 700)
+op <- par(mar = c(10,4,4,1) + 0.1)
+barplot(t(as.matrix(top[, c("RSCU_Ecoli","RSCU_Cryo")])),
+        beside = TRUE, las = 2,
+        names.arg = paste(top$Codon, paste0("(", top$AA, ")")),
+        main = "Top 20 codons by |RSCU difference|")
+legend("topleft", legend = c("E. coli","Cryobacterium"),
+       fill = c("gray60","gray80"), bty = "n")
+grid()
+par(op)
+dev.off()
+```
+
+**Display figure:**
+```{r p2-q5-show, echo=FALSE, fig.align='center'}
+knitr::include_graphics(file.path(outdirF, "fig_p2_q5_codon_rscu_topdiff.png"))
+```
+
+**Explanation:**  
+RSCU normalises codon counts within each synonymous family to highlight **preference** independent of amino-acid usage. Large |ΔRSCU| values indicate codons preferred in one organism over the other. Differences typically track **GC bias** (e.g., GC-ending codons enriched in GC-rich genomes), translational selection, and tRNA pools.
+
+
+
+
+## Q6 – Protein k-mers (k = 3–5): over/under-represented in Cryobacterium vs E. coli
+
+**Metho**
+All translated CDS were concatenated per organism (stop codons removed earlier).
+For each k ∈ {3,4,5}, k-mer frequencies were computed over the 20-AA alphabet and normalised to frequencies (freq = TRUE).
+We aligned the k-mer sets, computed Δfreq = (Cryo − E. coli), exported full tables, and plotted the top 10 over-represented and top 10 under-represented k-mers in Cryobacterium.
+
+**Code and Outputs:**
+```{r p2-q6}
+# ---- Q6: Protein k-mers (k = 3..5), over/under in Cryo vs E. coli ----
+# This chunk expects objects from earlier parts:
+#   - prot_ecoli_all: vector of amino acids from all E. coli proteins (no '*')
+#   - prot_cryo_all : vector of amino acids from all Cryobacterium proteins (no '*')
+#   - aa_alphabet   : the 20 standard amino acids used as the counting alphabet
+#   - outdirT/outdirF: output/figures folders
+#
+# Safety checks to fail fast if something wasn't created earlier:
+stopifnot(
+  exists("prot_ecoli_all"),
+  exists("prot_cryo_all"),
+  exists("aa_alphabet"),
+  exists("outdirT"),
+  exists("outdirF")
+)
+
+# Function: compute k-mer frequencies for both organisms, align them,
+# calculate Δfreq = Cryo − E. coli, save full CSV, and make plots for top/bottom 10.
+compare_kmers <- function(k) {
+  # Count k-mers as *frequencies* (sums to 1 over all observed k-mers)
+  k_ec <- seqinr::count(
+    prot_ecoli_all, wordsize = k, alphabet = aa_alphabet, freq = TRUE
+  )
+  k_cr <- seqinr::count(
+    prot_cryo_all,  wordsize = k, alphabet = aa_alphabet, freq = TRUE
+  )
+
+  # Align names so both vectors have the same k-mer order
+  all_names <- sort(unique(c(names(k_ec), names(k_cr))))
+  k1 <- k_ec[all_names]; k1[is.na(k1)] <- 0  # fill absent k-mers with 0
+  k2 <- k_cr[all_names]; k2[is.na(k2)] <- 0
+
+  # Build a tidy table with Δfreq
+  df <- data.frame(
+    Kmer = all_names,
+    Ecoli = as.numeric(k1),
+    Cryo  = as.numeric(k2)
+  )
+  df$Diff <- df$Cryo - df$Ecoli
+
+  # Order by Δfreq (descending: most over-represented in Cryo at top)
+  df <- df[order(df$Diff, decreasing = TRUE), ]
+
+  # Save the *full* table for this k
+  write.csv(
+    df,
+    file = file.path(outdirT, sprintf("p2_q6_k%d_kmers_freq.csv", k)),
+    row.names = FALSE
+  )
+
+  # Extract top 10 (over-represented in Cryo) and bottom 10 (under-represented)
+  top10 <- head(df, 10)
+  bot10 <- tail(df, 10)
+
+  # Plot: top 10 over-represented (Δfreq positive and largest)
+  png(file.path(outdirF, sprintf("fig_p2_q6_k%d_overrepresented.png", k)),
+      width = 1100, height = 700)
+  barplot(top10$Diff, names.arg = top10$Kmer, las = 2,
+          main = sprintf("k=%d: Top 10 over-represented in Cryobacterium (Cryo − E. coli)", k),
+          ylab = "Frequency difference (Δfreq)")
+  grid(); dev.off()
+
+  # Plot: top 10 under-represented (most negative Δfreq)
+  png(file.path(outdirF, sprintf("fig_p2_q6_k%d_underrepresented.png", k)),
+      width = 1100, height = 700)
+  barplot(rev(bot10$Diff), names.arg = rev(bot10$Kmer), las = 2,
+          main = sprintf("k=%d: Top 10 under-represented in Cryobacterium (Cryo − E. coli)", k),
+          ylab = "Frequency difference (Δfreq)")
+  grid(); dev.off()
+
+  # Return preview tables to display in the report if desired
+  list(top10 = top10, bot10 = bot10)
+}
+
+# Run for k = 3, 4, 5
+km3 <- compare_kmers(3)
+km4 <- compare_kmers(4)
+km5 <- compare_kmers(5)
+
+# Compact preview table (k=3) in the report to show both extremes together
+knitr::kable(
+  rbind(
+    transform(km3$top10, Set = "Over (Cryo > E. coli)"),
+    transform(km3$bot10, Set = "Under (Cryo < E. coli)")
+  )[ , c("Set","Kmer","Ecoli","Cryo","Diff") ],
+  caption = "k=3 k-mers most over- and under-represented in Cryobacterium vs E. coli"
+)
+
+```
+
+**Display figures:**
+```# Include all generated figures (k = 3,4,5) for both over- and under-represented sets
+knitr::include_graphics(file.path(outdirF, "fig_p2_q6_k3_overrepresented.png"))
+knitr::include_graphics(file.path(outdirF, "fig_p2_q6_k3_underrepresented.png"))
+knitr::include_graphics(file.path(outdirF, "fig_p2_q6_k4_overrepresented.png"))
+knitr::include_graphics(file.path(outdirF, "fig_p2_q6_k4_underrepresented.png"))
+knitr::include_graphics(file.path(outdirF, "fig_p2_q6_k5_overrepresented.png"))
+knitr::include_graphics(file.path(outdirF, "fig_p2_q6_k5_underrepresented.png"))
+
+```
+
+**Explanation:**  
+Over-represented k-mers in *Cryobacterium* likely reflect biases from **genomic GC content**, **preferred codons**, and **amino-acid composition** (e.g., enrichment for Gly/Ala/Pro motifs).  
+Under-represented motifs can indicate **structural/functional constraints** or avoidance of destabilising repeats.  
+Comparing the Cryo Δfreq with *E. coli* shows whether the same motifs are preferred to a **similar extent** (Δfreq ≈ 0) or **differ markedly** (|Δfreq| large), consistent with distinct evolutionary pressures and habitat adaptation.
+
+
+---
+# Discussion and Conclusion
+
+Part 1 demonstrated data wrangling and statistical analysis using RNA-seq counts and tree growth data, including summary statistics, hypothesis testing, and reproducible plotting.  
+Part 2 compared *E. coli* and *Cryobacterium sp.* SO1 coding sequences, showing differences in total coding length, CDS length distributions, nucleotide and amino-acid composition, codon usage (RSCU), and protein k-mer patterns—consistent with distinct genomic GC content and ecological adaptation.  
+
+Overall, this assignment enhanced understanding of how R can be used for biological data analysis, enabling reproducible workflows and visualisation of complex genomic datasets.
+
+# References
+
+Deakin University Library 2025, *Deakin guide to Australian Harvard referencing*, viewed 6 October 2025, <https://www.deakin.edu.au/students/studying/study-support/referencing/harvard>.
+
+Charif, D & Lobry, JR 2007, ‘SeqinR 1.0-2: A contributed package to the R project for statistical computing devoted to biological sequences retrieval and analysis’, in *Structural approaches to sequence evolution*, Springer, pp. 207–232.
+
+Wright, F 1990, ‘The “effective number of codons” used in a gene’, *Gene*, vol. 87, no. 1, pp. 23–29.
+
+---

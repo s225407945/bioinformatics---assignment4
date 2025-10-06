@@ -1,0 +1,380 @@
+---
+title: "Bioinformatics Assignment 4 Report"
+author: "Avishka Kavindi Vithanage (s225407945)"
+date: "2025-10-06"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r}
+# ---- Global Setup ----
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+root <- getwd()
+paths <- list(
+  data    = file.path(root, "data"),
+  figs    = file.path(root, "figures"),
+  out     = file.path(root, "output"),
+  scripts = file.path(root, "scripts")
+)
+
+dir.create(paths$data,    showWarnings = FALSE)
+dir.create(paths$figs,    showWarnings = FALSE)
+dir.create(paths$out,     showWarnings = FALSE)
+dir.create(paths$scripts, showWarnings = FALSE)
+
+needs <- function(pkg) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, repos = "https://cloud.r-project.org")
+  }
+  library(pkg, character.only = TRUE)
+}
+stopifnot(
+  exists("paths"),
+  dir.exists(paths$data),
+  dir.exists(paths$out),
+  dir.exists(paths$figs)
+)
+
+```
+
+
+```
+
+# Introduction
+
+This report presents the outcomes of *Assessment 4* for the Bioinformatics unit.  
+The assignment aims to demonstrate competency in using **R** and **GitHub** for data analysis, visualization, and biological sequence exploration.  
+It is divided into two main parts:
+
+- **Part 1** focuses on importing, wrangling, and analysing biological data using two datasets—`gene_expression.tsv` and `growth_data.csv`. The tasks involve data summarisation, statistical testing, and graphical presentation.
+- **Part 2** examines sequence diversity by comparing *Escherichia coli* with *Cryobacterium sp.* SO1, including coding sequence composition, nucleotide and amino acid frequencies, codon usage, and k-mer patterns.
+
+Together, these exercises apply core bioinformatics principles to interpret biological data reproducibly within an RMarkdown workflow.
+## Download and prepare input files
+**Method:**  
+The two data files for Part 1 were downloaded from the official GitHub repository provided in the assignment instructions and stored in the `data/` folder.
+
+
+**Code:**
+```{r download-data, eval=TRUE, message=FALSE, warning=FALSE}
+# Download Part 1 data into data/
+download.file("https://raw.githubusercontent.com/ghazkha/Assessment4/main/gene_expression.tsv",
+              destfile = "data/gene_expression.tsv", quiet = TRUE)
+
+download.file("https://raw.githubusercontent.com/ghazkha/Assessment4/main/growth_data.csv",
+              destfile = "data/growth_data.csv", quiet = TRUE)
+```
+These commands ensure both datasets are available locally before analysis begins.
+
+# Part 1 – Data Analysis
+
+This section focuses on analysing gene expression and tree growth data using R.  
+It involves data import, wrangling, statistical summaries, and plotting to extract key biological insights.
+
+---
+
+## Q1 – Read the gene expression file
+
+**Method:**  
+The file `gene_expression.tsv` was read into R using `read.table()`.  
+The first column (gene identifiers) was assigned as row names so each gene could be referenced by its ID.  
+The first six genes are shown below to confirm successful import.
+
+**Code:**
+```{r q1}
+# Define input and output file paths
+infile  <- file.path(paths$data, "gene_expression.tsv")
+outdirT <- paths$out
+
+# Read the gene expression data with gene IDs as row names
+gene <- read.table(infile, header = TRUE, sep = "\t", row.names = 1, check.names = FALSE)
+
+# Show the first six genes
+q1_head <- head(gene)
+
+# Save small table to output folder
+write.csv(q1_head, file.path(outdirT, "q01_first6_genes.csv"))
+
+# Display the table
+knitr::kable(q1_head)
+```
+
+
+## Q2 – Add a mean expression column
+
+**Method:**  
+To identify genes with high or low overall expression, the mean count across all three samples was calculated for each gene using the `rowMeans()` function.  
+A new column called `mean_expr` was added to the dataset.  
+The first six rows are displayed below to confirm the new column was created successfully.
+
+**Code and Output:**
+```{r q2}
+# Add a mean expression column to the dataset
+gene$mean_expr <- rowMeans(gene)
+
+# Save and view first six rows with the mean column
+write.csv(head(gene), file.path(outdirT, "q02_first6_with_mean.csv"))
+knitr::kable(head(gene))
+```
+
+**Explanation:**  
+The table below shows each gene’s raw counts and its calculated mean expression value across the three samples.  
+This will be used in later questions to identify highly expressed genes and visualise expression distributions.
+
+## Q3 – Top 10 genes with the highest mean expression
+
+**Method:**  
+The dataset was sorted in descending order of the calculated mean expression values.  
+The ten genes with the highest mean expression were extracted using the `order()` function.  
+This helps identify the most actively expressed genes across the three samples.
+
+**Code and Output:**
+```{r q3}
+# Order genes by mean expression (highest to lowest)
+o <- order(gene$mean_expr, decreasing = TRUE)
+
+# Select top 10 genes
+top10 <- head(gene[o, , drop = FALSE], 10)
+
+# Save results to the output folder
+write.csv(top10, file.path(outdirT, "q03_top10_highest_mean.csv"))
+
+# Display table in the report
+knitr::kable(top10)
+```
+
+**Explanation:**  
+The table above lists the 10 genes with the highest average expression across all samples.  
+These are likely to be housekeeping or highly active genes in the sampled tissue.  
+The result was saved as `q03_top10_highest_mean.csv` in the `output/` directory for reference.
+
+
+## Q4 – Number of genes with mean expression < 10
+
+**Method:**  
+To determine how many genes were weakly expressed, a logical filter was applied to count all genes with a mean expression value below 10.  
+The `sum()` function was used to total all cases meeting this condition.
+
+**Code and Output:**
+```{r q4}
+# Count how many genes have mean expression less than 10
+n_lt10 <- sum(gene$mean_expr < 10)
+
+# Save the result to a text file
+writeLines(sprintf("Genes with mean < 10: %d", n_lt10),
+           con = file.path(outdirT, "q04_count_mean_lt10.txt"))
+
+# Display the result directly in the report
+sprintf("Number of genes with mean expression < 10: %d", n_lt10)
+```
+
+**Explanation:**  
+This result represents the total number of genes that show very low expression levels across all samples.  
+These genes are likely transcriptionally inactive or expressed only in specific conditions.
+
+## Q5 – Histogram of mean expression values
+
+**Method:**  
+A histogram was created to visualise the distribution of average gene expression levels across all genes.  
+The histogram helps identify the general pattern of expression — for instance, whether most genes have low expression and only a few are highly expressed.
+
+**Code:**
+```{r q5}
+# Save histogram of mean expression to output folder
+png(file.path(paths$figs, "fig_q05_mean_hist.png"), width = 900, height = 600)
+hist(gene$mean_expr, breaks = 40,
+     xlab = "Mean expression",
+     main = "Q5: Histogram of Mean Gene Expression",
+     col = "lightblue", border = "white")
+grid()
+dev.off()
+```
+
+**Display in report:**
+```{r q5-show, echo=FALSE, fig.align='center'}
+# Include saved figure directly into the HTML report
+knitr::include_graphics(file.path(paths$figs, "fig_q05_mean_hist.png"))
+```
+
+**Explanation:**  
+The histogram shows that most genes have low mean expression values, with only a small number showing high expression.  
+This is typical of RNA-seq data, where many genes are either silent or weakly transcribed, and a few are highly active.
+
+
+## Q6 – Import growth data and list column names
+
+**Method:**  
+The file `growth_data.csv` was imported to confirm that the data structure matched the assignment description.  
+Listing the column names verifies that all expected variables (e.g. `Site`, `Circumf_2005_cm`, `Circumf_2010_cm`, `Circumf_2020_cm`) are present before further analysis.
+
+**Code and Output:**
+```{r q6}
+# PART 1 — growth_data (Q6)
+# Computes summary stats, boxplots, 10-yr growth, t-test
+
+infile  <- file.path(paths$data, "growth_data.csv")
+outdirT <- paths$out
+outdirF <- paths$figs
+
+# Read the CSV file
+growth <- read.csv(infile, stringsAsFactors = FALSE)
+
+# Extract and save column names
+colnames_df <- data.frame(column_names = names(growth))
+write.csv(colnames_df,
+        file.path(outdirT, "q06_column_names.csv"),
+        row.names = FALSE)
+
+# Display in report
+knitr::kable(colnames_df, col.names = "Column names")
+```
+
+**Explanation:**  
+This confirms the data file was loaded correctly and contains the required variables for calculating growth statistics in subsequent questions.
+
+
+## Q7 – Mean and standard deviation of tree circumference (2005 and 2020) by Site
+
+**Method:**  
+To summarise tree growth at different sites, the mean and standard deviation of trunk circumference were calculated for the start (2005) and end (2020) of the study.  
+The `aggregate()` function was used to group data by site and apply the `mean` and `sd` functions to each column.  
+The two summary tables were merged for easy comparison.
+
+**Code and Output:**
+```{r q7}
+# Q7: mean & sd at start (2005) and end (2020) by Site
+mean_summary <- aggregate(cbind(Circumf_2005_cm, Circumf_2020_cm) ~ Site,
+                          data = growth, FUN = function(x) mean(x, na.rm = TRUE))
+sd_summary   <- aggregate(cbind(Circumf_2005_cm, Circumf_2020_cm) ~ Site,
+                          data = growth, FUN = function(x) sd(x, na.rm = TRUE))
+
+summary_table <- merge(mean_summary, sd_summary,
+                       by = "Site", suffixes = c("_Mean", "_SD"))
+
+# Save to output folder
+write.csv(summary_table,
+          file.path(outdirT, "q07_mean_sd_2005_2020_by_site.csv"),
+          row.names = FALSE)
+
+# Display results in report
+knitr::kable(summary_table,
+             caption = "Mean and standard deviation of tree circumference (2005 vs 2020) by Site")
+```
+
+**Explanation:**  
+This table shows the average and variability of tree circumference at both the control and treatment sites in 2005 and 2020.  
+An increase in mean circumference from 2005 to 2020 indicates overall growth over the 15-year period.
+
+
+## Q8 – Boxplots of tree circumference at start (2005) and end (2020) by Site
+
+**Method:**  
+Boxplots were used to compare the distribution of tree trunk circumferences between the control and treatment sites at the beginning (2005) and end (2020) of the 20-year period.  
+The `boxplot()` function was used to visualise median, spread, and outliers for each site.  
+Plots were saved as a single image showing both years side-by-side.
+
+**Code:**
+```{r q8}
+# Q8: boxplots (start vs end by Site)
+png(file.path(outdirF, "fig_q08_boxplot_2005_2020_by_site.png"), width = 1000, height = 600)
+par(mfrow = c(1,2))  # 1 row, 2 plots side by side
+
+# Boxplot for 2005
+boxplot(Circumf_2005_cm ~ Site, data = growth,
+        main = "Circumference 2005", ylab = "cm", col = "skyblue")
+grid()
+
+# Boxplot for 2020
+boxplot(Circumf_2020_cm ~ Site, data = growth,
+        main = "Circumference 2020", ylab = "cm", col = "lightgreen")
+grid()
+
+dev.off()
+par(mfrow = c(1,1))  # reset layout
+```
+
+**Display in report:**
+```{r q8-display, echo=FALSE, fig.align='center'}
+knitr::include_graphics(file.path(outdirF, "fig_q08_boxplot_2005_2020_by_site.png"))
+```
+
+**Explanation:**  
+The boxplots illustrate the increase in tree circumference from 2005 to 2020 at both sites.  
+The treatment site shows a slightly greater median and spread in 2020 compared to the control site, suggesting that environmental or treatment factors may have enhanced growth.
+
+
+## Q9 – Mean 10-year growth (2010 → 2020) by Site
+
+**Method:**  
+The 10-year growth for each tree was calculated by subtracting the circumference in 2010 from the circumference in 2020.  
+The `aggregate()` function was used to compute the mean and standard deviation of 10-year growth for each site (Control and Treatment).  
+The merged summary table allows comparison of average growth and variability between sites.
+
+**Code and Output:**
+```{r q9}
+# Q9: mean 10-year growth (2010→2020) by Site
+growth$Growth_10yrs <- growth$Circumf_2020_cm - growth$Circumf_2010_cm
+
+# Compute mean and SD by Site
+mean10 <- aggregate(Growth_10yrs ~ Site, data = growth,
+                    FUN = function(x) mean(x, na.rm = TRUE))
+sd10   <- aggregate(Growth_10yrs ~ Site, data = growth,
+                    FUN = function(x) sd(x, na.rm = TRUE))
+
+# Merge results
+tab10  <- merge(mean10, sd10, by = "Site", suffixes = c("_Mean", "_SD"))
+
+# Save summary table
+write.csv(tab10, file.path(outdirT, "q09_growth10_by_site.csv"), row.names = FALSE)
+
+# Display in report
+knitr::kable(tab10, caption = "Mean and standard deviation of 10-year tree growth (2010–2020) by Site")
+```
+
+**Explanation:**  
+This table shows the average increase in tree circumference over the last decade at each site.  
+Higher mean growth at the treatment site would suggest that site conditions or interventions promoted faster tree expansion compared to the control site.
+
+
+
+## Q10 – t-test of 10-year growth between sites
+
+**Method:**  
+An independent two-sample *t*-test was performed to assess whether the 10-year growth (2010→2020) differed significantly between the control and treatment sites.  
+The test compares the mean growth values of the two groups.  
+A *p*-value below 0.05 indicates a statistically significant difference.
+
+**Code and Output:**
+```{r q10}
+# Q10: t-test of 10-year growth between sites
+tt <- t.test(Growth_10yrs ~ Site, data = growth)
+
+# Save full t-test output to file
+capture.output(tt, file = file.path(outdirT, "q10_ttest_growth10_by_site.txt"))
+
+# Also write just the p-value (for easy access in report)
+writeLines(sprintf("t-test p-value: %g", tt$p.value),
+           file.path(outdirT, "q10_ttest_pvalue.txt"))
+
+# Display summary in report
+sprintf("t-test p-value (difference in 10-year growth between sites): %g", tt$p.value)
+```
+
+**Explanation:**  
+The *t*-test evaluates whether mean 10-year growth differs between the control and treatment sites.  
+If the *p*-value is less than 0.05, the difference is statistically significant, suggesting that site conditions had a measurable impact on tree growth rates.
+
+
+---
+
+# References
+
+Deakin University Library 2025, *Deakin guide to Australian Harvard referencing*, viewed 6 October 2025, <https://www.deakin.edu.au/students/studying/study-support/referencing/harvard>.
+
+Charif, D & Lobry, JR 2007, ‘SeqinR 1.0-2: A contributed package to the R project for statistical computing devoted to biological sequences retrieval and analysis’, in *Structural approaches to sequence evolution*, Springer, pp. 207–232.
+
+Wright, F 1990, ‘The “effective number of codons” used in a gene’, *Gene*, vol. 87, no. 1, pp. 23–29.
+
+---
