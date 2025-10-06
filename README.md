@@ -149,35 +149,3 @@ Include figures/ and output/ if requested by the rubric (or provide the knitted 
 
 Unless explicitly required, do not upload the large FASTA files.
 
-Optional: .gitignore
-
-If you push to GitHub, consider adding:
-
-# R stuff
-.Rproj.user/
-.Rhistory
-.RData
-.Ruserdata
-
-# Knitr/rmarkdown caches
-*_cache/
-cache/
-*.utf8.md
-
-# Large data
-*.fa
-*.fa.gz
-data/*.fa
-data/*.fa.gz
-
-# Outputs
-figures/
-output/
-
-Acknowledgements / References
-
-Charif & Lobry (2007): SeqinR
-
-Wright (1990): Effective number of codons
-
-Deakin University Library (2025): Harvard referencing guide
